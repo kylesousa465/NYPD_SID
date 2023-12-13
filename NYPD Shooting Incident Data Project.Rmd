@@ -1,0 +1,259 @@
+---
+title: "NYPD Shooting Incident Project"
+author: "Kyle Sousa"
+date: "2023-12-08"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library setup}
+library(tidyverse)
+library(lubridate)
+library(ggmap)
+```
+
+# Part 1: Importing and Tidying the Data
+```{r Initial Exploration}
+NYPD_SID <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+# Import from url
+NYPD_SID$OCCUR_DATE <- mdy(NYPD_SID$OCCUR_DATE)
+# Reformat Occurrance Date to a date fomat
+NYPD_SID <- select(NYPD_SID,-c(LOC_OF_OCCUR_DESC,JURISDICTION_CODE,LOC_CLASSFCTN_DESC,Lon_Lat,X_COORD_CD,Y_COORD_CD))
+
+summary(NYPD_SID)
+#length(NYPD_SID$INCIDENT_KEY)
+#length(NYPD_SID$PRECINCT)
+```
+The summary() of this data shows 27312 observations of all variables. It appears as though there is no missing data.
+
+# Part 2: Initial Visualization of Incidence in the Five Boroughs
+```{r visualization}
+#NYPD_SID
+
+ListBoros <- unique(NYPD_SID$BORO)
+# Find all the Boros
+BoroSum <- data.frame(ListBoros,c(rep(NA,length(ListBoros))),c(rep(NA,length(ListBoros))))
+colnames(BoroSum) <- c("Boro","Murder_Count","NonMurder_Count")
+# Create a datafrmae summarizing Murder incidents and NonMurder incidents in each Boro
+
+NYPD_SID_byBoro <- NYPD_SID %>%
+  group_by(BORO) %>%
+  summarize(Murders = sum(STATISTICAL_MURDER_FLAG),NonMurders = length(STATISTICAL_MURDER_FLAG)-sum(STATISTICAL_MURDER_FLAG)) %>%
+  select(BORO,Murders,NonMurders) %>%
+  ungroup()
+# Grouped data by Boro, and summarized to include statistical murder flag
+
+NYPD_SID_byBoro_PivotLong <- NYPD_SID_byBoro %>%
+  pivot_longer(cols=c(Murders,NonMurders),names_to="Classification",values_to = "Count")
+# Pivot data to longer format
+
+ggplot(NYPD_SID_byBoro,aes(x=BORO,y=Murders))+
+  geom_bar(stat="identity",fill="coral")
+# Graph: Murders by boro
+
+ggplot(NYPD_SID_byBoro,aes(x=BORO,y=NonMurders))+
+  geom_bar(stat="identity",fill="aquamarine2")
+# Graph: Nonmurders by Boro
+
+ggplot(NYPD_SID_byBoro_PivotLong,aes(fill=Classification,x=BORO,y=Count))+
+  geom_bar(stat="identity")+
+  xlab("Borough")+
+  ylab("Total Number of Shooting Incidents")
+# Grab combined Murders/Nonmurders (stacked bar)
+
+total_murder <- sum(NYPD_SID$STATISTICAL_MURDER_FLAG)
+pct_murder <- sum(NYPD_SID$STATISTICAL_MURDER_FLAG)/length(NYPD_SID$STATISTICAL_MURDER_FLAG)
+# Check total murder number and percent of shooting incidents classified as murder
+```
+## General Impressions: Shooting Incidents by Boro
+I started my analysis by looking at the distribution of shooting incidents among the five boroughs. I wanted to see where most of the data was coming from. This is not adjusted for population size, so it is not surprising that Brooklyn (the largest borough by a sizeable margin) had the highest total number of shooting incidents. It is noteworthy however that not all the Boroughs fall in line by population size.
+
+I also looked at the rate of incidents that recieved the statistical murder flag versus the ones that didn't receive that designation. I started by graphing each separately but ultiately I found it most useful to visualize as a stacked bar graph. 
+
+I decided to seek out some census data, and found population data from 2021 from the US Census. I input that data manually since I could not find a live link, and I only needed five numbers (2021 Populations for each of the five Boroughs). Since 2021 was the most recent year for which I had population data, I decided to first explore the incident data for that yera specifically.
+
+```{r population}
+
+
+NYPD_SID_2021 <- NYPD_SID %>%
+  mutate(year=year(NYPD_SID$OCCUR_DATE)) %>%
+  filter(year == 2021)
+# Filter the NYPD Shooting Incident Dataset down to 2021 incidents
+
+NYPD_SID_2021_byBoro <- NYPD_SID_2021 %>%
+  group_by(BORO) %>%
+  summarize(Murders = sum(STATISTICAL_MURDER_FLAG),NonMurders = length(STATISTICAL_MURDER_FLAG)-sum(STATISTICAL_MURDER_FLAG)) %>%
+  select(BORO,Murders,NonMurders) %>%
+  ungroup()
+# Recycled this code from earlier, creating 2021-specific version
+# Group 2021 NYPD SID data by statistical murder flag
+
+NYPD_SID_2021_byBoro_PivotLong <- NYPD_SID_2021_byBoro %>%
+  pivot_longer(cols=c(Murders,NonMurders),names_to="Classification",values_to = "Count")
+
+ggplot(NYPD_SID_2021_byBoro,aes(x=BORO,y=Murders))+
+  geom_bar(stat="identity",fill="coral")
+
+ggplot(NYPD_SID_2021_byBoro,aes(x=BORO,y=NonMurders))+
+  geom_bar(stat="identity",fill="aquamarine2")
+
+ggplot(NYPD_SID_2021_byBoro_PivotLong,aes(fill=Classification,x=BORO,y=Count))+
+  geom_bar(stat="identity")+
+  xlab("Borough")+
+  ylab("Number of Shooting Incidents in 2021")
+# Plot 2021 data
+```
+## Shooting Incident Rates in 2021
+Here we have the Shooting Incident Rates in 2021, and we see that in this particular year, the Bronx surpasses Brooklyn, and Manhattan surpasses Queens. These are contrary to the relative rankings for the entire dataset (which runs from 2006 to 2022)
+
+I decided to proceed with my analaysis of population adjusted incident rates for 2021
+
+
+## Population Adjusted Incident Rates (2021)
+
+```{r popoulation}
+Boro_Populations_2021 <- data.frame(c("BRONX","BROOKLYN","MANHATTAN","QUEENS","STATEN ISLAND"),c(1424948,2641052,1576876,2331143,493494))
+colnames(Boro_Populations_2021) <- c("BORO","Population")
+# Input 2021 Census data for total boro populations found at https://datacommons.org/place/geoId/36085
+
+Boros2021 <- merge(NYPD_SID_2021_byBoro,Boro_Populations_2021)
+# Merge dataframe with Murder/Nonmurder rates with the Population data
+
+Boros2021 <- mutate(Boros2021,perCapitaMurders=Murders/Population,perCapitaNonMurders=NonMurders/Population)
+
+Boros2021_PivotLong <- Boros2021 %>%
+  pivot_longer(cols=c(perCapitaMurders,perCapitaNonMurders),names_to="Classification",values_to = "Rate")
+
+ggplot(Boros2021_PivotLong,aes(fill=Classification,x=BORO,y=Rate))+
+  geom_bar(stat="identity")+
+  xlab("Borough")+
+  ylab("Shooting Incidents per Capita")
+
+```
+## Population-Adjusted Look at Shooting Incidence in All Five Boroughs
+Here we have a population-adjusted look at Shooting Incidence in all five boroughs in 2021. The Bronx, despite ranking behind Brooklyn in total number of shooting incidents, far surpasses Brooklyn when adjusted for population.
+
+
+# Part 3: Shooting Incident Hotspots and Hottimes
+I decided to finish my analysis with a preliminary look at hotspots and hot-times for shooting incidents.
+
+```{r map}
+Missing_Locations <- sum(is.na(NYPD_SID$Latitude))
+# Count number of Shooting Incidents without a Lat/Long location
+paste("There are Shooting Incidents that are missing a Lat/Long location. There are ",Missing_Locations," such incidents")
+# Write and print a warning about these incidents lacking a lat/long location
+NYPD_SID_map <- filter(NYPD_SID,!is.na(NYPD_SID$Latitude))
+# Filter our incidents which do not have a latitude and longitude
+
+# Commenting this out. It was a preliminary plot of incident locations before I got into the mapping
+#ggplot(NYPD_SID_map,aes(x=Latitude,y=Longitude))+
+#  geom_point(alpha=0.5,size=1)+
+# ggtitle("NYPD Shooting Incident Occurrences by Coordinate Location")
+# Graph incidents on an X/Y plane using Lat/Long
+
+NYC_Map1 <- get_map(location = c(lon=-74.0060,lat=40.7128),zoom=10)
+# get NYC map from Google Maps API (requires credential-- put in console)
+MAP1 <- ggmap(NYC_Map1)
+MAP1 + geom_point(data=NYPD_SID_map,aes(x=Longitude,y=Latitude),color="red",size=0.1,alpha=0.01)
+
+#min(NYPD_SID_map$Longitude)
+#max(NYPD_SID_map$Longitude)
+#min(NYPD_SID_map$Latitude)
+#max(NYPD_SID_map$Latitude)
+# Commented out these lines, but left them in. They were just used to get Lat/Lon bounds for data
+
+bbox <- make_bbox(NYPD_SID_map$Longitude,NYPD_SID_map$Latitude,f=0.15)
+# Get boundary box
+NYC_Map2 <- get_map(location=bbox,color="bw")
+# Get map
+MAP2 <- ggmap(NYC_Map2)
+# Save map
+MAP2 + geom_point(data=NYPD_SID_map,aes(x=Longitude,y=Latitude),color="red",size=0.1,alpha=0.01)
+# Plot incident data onto map using Long/Lat
+```
+## Shooting Incident Hotspots
+I used the latitude and longitude to plot incident locations onto a map. I set a small point size and low alpha, so individual incidents are hard to see, but the effect is increased amounts of red where there are a lot of incidents.
+
+
+## Occurence Time
+I decided to look at the occurence time, but I wanted to separate the data by day of the week since I presume most people's schedules are different on say a Tuesday vs. a Sunday.
+```{r Day of Week}
+weekday_list <- wday(NYPD_SID$OCCUR_DATE)
+# Determine the day of the week (Monday, Tuesday, etc) where each incident occurred
+NYPD_SID_wday <- data.frame(NYPD_SID,weekday_list)
+# Add the day of week and create a new dataframe
+
+Sunday_List <- filter(NYPD_SID_wday,NYPD_SID_wday$weekday_list == 1)
+Monday_List<- filter(NYPD_SID_wday,NYPD_SID_wday$weekday_list == 2)
+Tuesday_List<- filter(NYPD_SID_wday,NYPD_SID_wday$weekday_list == 3)
+Wednesday_List<- filter(NYPD_SID_wday,NYPD_SID_wday$weekday_list == 4)
+Thursday_List<- filter(NYPD_SID_wday,NYPD_SID_wday$weekday_list == 5)
+Friday_List <- filter(NYPD_SID_wday,NYPD_SID_wday$weekday_list == 6)
+Saturday_List <- filter(NYPD_SID_wday,NYPD_SID_wday$weekday_list == 7)
+# From the NYPD_SID_wday dataframe, create subset dataframes (one for each day of the week)
+
+
+Incidents_by_Weekday <- data.frame(c(1:7),c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"),c(nrow(Sunday_List),nrow(Monday_List),nrow(Tuesday_List),nrow(Wednesday_List),nrow(Thursday_List),nrow(Friday_List),nrow(Saturday_List)))
+colnames(Incidents_by_Weekday) <- c("DayNum","Day_of_Week","Total_Incidents")
+# Determine total incidents on each day of the week
+
+ggplot(Incidents_by_Weekday,aes(x=DayNum,y=Total_Incidents))+
+  geom_bar(stat="identity",fill="coral")+
+  geom_text(aes(label=Day_of_Week),vjust=10)
+# Create a simple bar graph to show which days have higher numbers of incidents
+
+```
+After separating the data by day of the week, I wanted to take a quick look at whether shooting incidents were more common on some days than others. Incident rates were higher on the weekends, and weekend-adjacent days (Monday/Friday) were the next most highest. I decided to take a look at the hour-by-hour occurences on each day of the week.
+
+```{r time of day}
+hist(as.numeric(Sunday_List$OCCUR_TIME/(60*60)),breaks=c(0:24),main="Shooting Incidents by Time of Day (Sundays)",xlab="Hours after Midnight",ylab="Incidents",ylim=c(0,600))
+hist(as.numeric(Monday_List$OCCUR_TIME/(60*60)),breaks=c(0:24),main="Shooting Incidents by Time of Day (Mondays)",xlab="Hours after Midnight",ylab="Incidents",ylim=c(0,600))
+hist(as.numeric(Tuesday_List$OCCUR_TIME/(60*60)),breaks=c(0:24),main="Shooting Incidents by Time of Day (Tuesdays)",xlab="Hours after Midnight",ylab="Incidents",ylim=c(0,600))
+hist(as.numeric(Wednesday_List$OCCUR_TIME/(60*60)),breaks=c(0:24),main="Shooting Incidents by Time of Day (Wednesdays)",xlab="Hours after Midnight",ylab="Incidents",ylim=c(0,600))
+hist(as.numeric(Thursday_List$OCCUR_TIME/(60*60)),breaks=c(0:24),main="Shooting Incidents by Time of Day (Thursdays)",xlab="Hours after Midnight",ylab="Incidents",ylim=c(0,600))
+hist(as.numeric(Friday_List$OCCUR_TIME/(60*60)),breaks=c(0:24),main="Shooting Incidents by Time of Day (Fridays)",xlab="Hours after Midnight",ylab="Incidents",ylim=c(0,600))
+hist(as.numeric(Saturday_List$OCCUR_TIME/(60*60)),breaks=c(0:24),main="Shooting Incidents by Time of Day (Saturdays)",xlab="Hours after Midnight",ylab="Incidents",ylim=c(0,600))
+# For each day of the week, create a histogram showing how many incidents occurred in any given hour (i.e. 12am-1am is Hour 1, 1am-2pm is Hour 2)
+```
+```{r  WeekLongHistogram}
+
+NYPD_SID_wday_full <- NYPD_SID_wday %>%
+  mutate(OCCUR_HOUR = as.numeric(1+floor(OCCUR_TIME/3600))) %>%
+  mutate(Hour_of_Week = ((weekday_list-1)*24)+OCCUR_HOUR)
+
+df_WeekHour <- matrix(nrow=(7*24),ncol=2)
+df_WeekHour[,1] <- 1:168
+colnames(df_WeekHour) <- c("Hour_of_Week","Incidents")
+df_WeekHour
+
+
+for (i in 1:168) {
+  df_WeekHour[i,2] <- sum(NYPD_SID_wday_full$Hour_of_Week==i)
+  }
+
+WeekPlotdf <- data.frame(df_WeekHour)
+
+ggplot(WeekPlotdf,aes(x=Hour_of_Week,y=Incidents))+
+         geom_point(size=2)+
+         scale_x_continuous(breaks=seq(from=0,to=168,by=24))+
+         xlab("Hour of Week")+
+         ylab("Total Incidents Occurred (2006-2022)")
+
+```
+
+## Week Day Analysis
+This analysis was useful to me in understanding when shooting incidents are more likely to occur. While Sunday was the highest-incident day, we can see from this graph that Sunday shooting incidents most commonly occur in the first few hours of the morning, and are perhaps best considered as part of the Saturday-night spike. I think my next step would be to stitch these seven graphs into a continuous weekly timeline.
+
+One thing that was interesting to me here was the clear and stringent periodicity.
+
+# Part 4: Discussion of Bias
+
+I think I probably implicitly bring biases to this analysis. I have been to four of the five boroughs of New York City, and all for very different reasons. Walking around those areas, I had different levels of concern. I once saw a violent incident in Manhattan, and I've been in Brooklyn late on Saturday nights. The one time I was in Staten Island was for the New York City Marathon, and I walked past dozens of officers in tactical gear (which made me feel safer, but maybe wouldn't make everyone feel safer). My point is that I have certain expectations of how safe or unsafe some of these areas might be, and if I'm not careful its certainly possible that those biases could influence my analysis, for example leading me to accept prematurely a conclusion that night not be as strongly supported by the data as I would usually demand.
+
+For this analysis, much of the data I used was times, dates, and locations, so at least in that sense the raw data is fairly objective. However, it is reasonable to ask if every shooting incident in New York City is reported to police. If not, is there a tendency for certain areas or certain people to avoid contacting police? We could concievably be missing some data in a way that biases our analysis.
+
